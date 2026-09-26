@@ -3,6 +3,6 @@
   "name":"github-image-bed-cloudflare",
   "main":"src/index.js",
   "compatibility_date":"2026-09-25",
-  "assets":{"directory":"./public","binding":"ASSETS","run_worker_first":["/api/*"]},
+  "assets":{"directory":"./public","binding":"ASSETS","html_handling":"none","run_worker_first":["/api/*"]},
   "vars":{"GITHUB_OWNER":"Xunlin012","GITHUB_REPO":"my-image-bed","GITHUB_BRANCH":"main","GITHUB_PATH":"images","MAX_FILE_MB":"10"}
 }
