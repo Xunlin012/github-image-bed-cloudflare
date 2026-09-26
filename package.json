@@ -1,0 +1,1 @@
+{"name":"github-image-bed-cloudflare","private":true,"scripts":{"deploy":"wrangler deploy","dev":"wrangler dev"},"devDependencies":{"wrangler":"^4.40.0"}}
