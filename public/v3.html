@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GitHub 图床</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f5f6f8;color:#171717;font:16px system-ui,-apple-system,sans-serif}
+main{max-width:720px;margin:auto;padding:18px}
+.card{background:#fff;border:1px solid #eee;border-radius:18px;padding:18px;margin-bottom:14px}
+h1{font-size:25px;margin:0 0 5px}
+h2{font-size:18px;margin:0 0 14px}
+.muted{color:#6b7280;font-size:13px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+input[type=password]{width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:16px}
+input[type=file]{display:none}
+.btn{border:0;border-radius:12px;padding:11px 14px;font-weight:700;background:#111827;color:#fff}
+.btn.secondary{background:#eef2f7;color:#111}
+.btn.danger{background:#fee2e2;color:#991b1b}
+.drop{border:2px dashed #cbd5e1;border-radius:18px;padding:28px;text-align:center}
+.status{margin-top:12px;font-size:13px;white-space:pre-wrap;word-break:break-word}
+.item{border-top:1px solid #eee;padding:12px 0}
+.thumb{width:72px;height:72px;object-fit:cover;border-radius:10px;background:#eee}
+.hidden{display:none}
+.code{font-size:12px;background:#f3f4f6;padding:8px;border-radius:8px;word-break:break-all}
+</style>
+</head>
+
+<body>
+<main>
+
+<div class="card">
+<h1>GitHub 图床</h1>
+<div class="muted">Cloudflare Workers · GitHub 存储</div>
+</div>
+
+<div class="card">
+<h2>管理员密钥</h2>
+<input id="key" type="password" placeholder="请输入 ADMIN_KEY">
+<div class="row" style="margin-top:10px">
+<button class="btn" id="saveKey">保存密钥</button>
+<button class="btn secondary" id="clearKey">清除密钥</button>
+</div>
+<div id="keyStatus" class="status"></div>
+</div>
+
+<div class="card">
+<h2>上传图片</h2>
+<div id="drop" class="drop">
+<div style="margin-bottom:12px">选择图片上传</div>
+<label class="btn">
+选择图片
+<input id="file" type="file" accept="image/*">
+</label>
+</div>
+<div id="uploadStatus" class="status"></div>
+</div>
+
+<div class="card">
+<div class="row" style="justify-content:space-between;align-items:center">
+<h2>图片</h2>
+<button class="btn secondary" id="refresh">刷新</button>
+</div>
+<div id="list"></div>
+<div id="listStatus" class="status"></div>
+</div>
+
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+
+const keyInput = $("#key");
+const savedKey = localStorage.getItem("imageBedKey") || "";
+keyInput.value = savedKey;
+
+function getKey(){
+  return keyInput.value.trim();
+}
+
+function saveKey(){
+  const key = getKey();
+  if(!key){
+    $("#keyStatus").textContent = "请输入 ADMIN_KEY";
+    return;
+  }
+  localStorage.setItem("imageBedKey", key);
+  $("#keyStatus").textContent = "密钥已保存";
+  load();
+}
+
+function clearKey(){
+  localStorage.removeItem("imageBedKey");
+  keyInput.value = "";
+  $("#keyStatus").textContent = "密钥已清除";
+}
+
+$("#saveKey").onclick = saveKey;
+$("#clearKey").onclick = clearKey;
+
+async function api(url, options={}){
+  const key = getKey();
+
+  if(!key){
+    throw new Error("请先输入 ADMIN_KEY");
+  }
+
+  const headers = new Headers(options.headers || {});
+  headers.set("x-admin-key", key);
+
+  const response = await fetch(url, {
+    ...options,
+    headers
+  });
+
+  const text = await response.text();
+
+  let data = null;
+  try{
+    data = text ? JSON.parse(text) : {};
+  }catch(e){
+    throw new Error(
+      "服务器返回的不是 JSON\n" +
+      "HTTP " + response.status + "\n" +
+      text.slice(0,500)
+    );
+  }
+
+  if(!response.ok){
+    throw new Error(
+      data.error ||
+      data.message ||
+      ("HTTP " + response.status)
+    );
+  }
+
+  return data;
+}
+
+async function load(){
+  const box = $("#list");
+  const status = $("#listStatus");
+
+  box.innerHTML = "";
+  status.textContent = "正在加载...";
+
+  try{
+    const data = await api("/api/list");
+
+    const items = data.items || data.files || data || [];
+
+    if(!Array.isArray(items) || items.length === 0){
+      status.textContent = "暂无图片";
+      return;
+    }
+
+    status.textContent = "";
+
+    for(const x of items){
+      const path = x.path || x.name || "";
+      const sha = x.sha || "";
+      const url = x.url || x.download_url || "";
+
+      const div = document.createElement("div");
+      div.className = "item";
+
+      div.innerHTML = `
+        <div class="row" style="align-items:center">
+          ${url ? `<img class="thumb" src="${escapeHtml(url)}">` : ""}
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:700;word-break:break-all">${escapeHtml(path)}</div>
+            ${url ? `<div class="code" style="margin-top:6px">${escapeHtml(url)}</div>` : ""}
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          ${url ? `<button class="btn secondary" onclick="copyText(${JSON.stringify(url)})">复制URL</button>` : ""}
+          ${url ? `<button class="btn secondary" onclick="copyText(${JSON.stringify("![]("+url+")")})">复制Markdown</button>` : ""}
+          <button class="btn danger" onclick="removeFile(${JSON.stringify(path)},${JSON.stringify(sha)})">删除</button>
+        </div>
+      `;
+
+      box.appendChild(div);
+    }
+
+  }catch(e){
+    status.textContent = "加载失败：\n" + e.message;
+  }
+}
+
+function escapeHtml(s){
+  return String(s)
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+async function upload(file){
+  const status = $("#uploadStatus");
+  status.textContent = "正在上传...";
+
+  try{
+    const fd = new FormData();
+    fd.append("image", file);
+
+    const data = await api("/api/upload", {
+      method:"POST",
+      body:fd
+    });
+
+    status.textContent =
+      "上传成功\n" +
+      (data.url || data.raw_url || "") +
+      (data.markdown ? "\n\n" + data.markdown : "");
+
+    load();
+
+  }catch(e){
+    status.textContent = "上传失败：\n" + e.message;
+  }
+}
+
+async function removeFile(path, sha){
+  if(!confirm("确定删除这张图片吗？")) return;
+
+  const status = $("#listStatus");
+  status.textContent = "正在删除...";
+
+  try{
+    await api("/api/delete", {
+      method:"DELETE",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({path,sha})
+    });
+
+    await load();
+
+  }catch(e){
+    status.textContent = "删除失败：\n" + e.message;
+  }
+}
+
+async function copyText(text){
+  try{
+    await navigator.clipboard.writeText(text);
+    alert("已复制");
+  }catch(e){
+    prompt("复制下面内容：",text);
+  }
+}
+
+$("#file").onchange = async e => {
+  const file = e.target.files[0];
+  if(file) await upload(file);
+};
+
+$("#refresh").onclick = load;
+
+load();
+</script>
+</body>
+</html>
